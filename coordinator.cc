@@ -21,6 +21,8 @@
 #include <google/protobuf/util/time_util.h>
 #include <grpc++/grpc++.h>
 
+#include <unordered_map>
+
 #include "coordinator.grpc.pb.h"
 #include "coordinator.pb.h"
 
@@ -39,6 +41,7 @@ using csce662::Confirmation;
 using csce662::ID;
 using csce662::ServerList;
 using csce662::SynchService;
+using csce662::SynchIDs;
 
 struct zNode{
     int serverID;
@@ -59,6 +62,8 @@ std::vector<zNode*> cluster3;
 
 // creating a vector of vectors containing znodes
 std::vector<std::vector<zNode*>> clusters = {cluster1, cluster2, cluster3};
+
+std::unordered_map<int, zNode*> synchID_to_server;
 
 void printClusters() {
     for (size_t clusterIndex = 0; clusterIndex < clusters.size(); ++clusterIndex) {
@@ -244,9 +249,11 @@ class CoordServiceImpl final : public CoordService::Service {
             zNode* curZ = clusters[clusterId - 1][curIndex];
             v_mutex.unlock();
             if (curZ->isActive()){ // setting the ServerInfo values to return to the client if its server is active
-                serverinfo->set_hostname(curZ->hostname);
-                serverinfo->set_port(curZ->port);
-                serverinfo->set_ismaster(curZ->isMaster);
+
+                // serverinfo->set_hostname(curZ->hostname);
+                // serverinfo->set_port(curZ->port);
+                // serverinfo->set_ismaster(curZ->isMaster);
+                synchID_to_server[id->id()] = curZ;
             } else {
                 std::cout << "The server is not active!\n";
             }
@@ -257,6 +264,27 @@ class CoordServiceImpl final : public CoordService::Service {
         return Status::OK;
     }
 
+
+    Status IsMaster(ServerContext* context, const ID* id, ServerInfo* serverinfo) override {
+        v_mutex.lock();
+        serverinfo->set_ismaster(synchID_to_server[id->id()]->isMaster);
+        v_mutex.unlock();
+        return Status::OK;
+    }
+
+
+    Status GetOtherClusterSynchIDs(ServerContext* context, const ID* id, SynchIDs* synchIDs) override {
+        
+        int clusterId = ((id->id() - 1) % 3) + 1;
+        v_mutex.lock();
+        for (const auto& pair : synchID_to_server) {
+            if (((pair.first - 1) % 3) + 1 != clusterId) {
+                synchIDs->add_synchids(pair.first);
+            }
+        }
+        v_mutex.unlock();
+        return Status::OK;
+    }
 
 };
 

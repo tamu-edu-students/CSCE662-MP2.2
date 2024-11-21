@@ -52,6 +52,7 @@ using csce662::Confirmation;
 using csce662::CoordService;
 using csce662::ID;
 using csce662::ServerInfo;
+using csce662::SynchIDs;
 using csce662::ServerList;
 using csce662::SynchronizerListReply;
 using csce662::SynchService;
@@ -85,7 +86,11 @@ bool file_contains_user(std::string filename, std::string user);
 
 void Heartbeat(std::string coordinatorIp, std::string coordinatorPort, ServerInfo serverInfo, int syncID);
 
-std::unique_ptr<csce662::CoordService::Stub> coordinator_stub_;
+bool IsMaster();
+
+std::vector<int> GetOtherClusterSynchIDs();
+
+std::unique_ptr<csce662::CoordService::Stub> stub;
 
 class SynchronizerRabbitMQ
 {
@@ -151,7 +156,7 @@ public:
         // TODO: add or modify what kind of queues exist in your clusters based on your needs
     }
 
-    void publishUserList()
+    void publishUserList(int other_synchID)
     {
         std::vector<std::string> users = get_all_users_func(synchID);
         std::sort(users.begin(), users.end());
@@ -162,7 +167,7 @@ public:
         }
         Json::FastWriter writer;
         std::string message = writer.write(userList);
-        publishMessage("synch" + std::to_string(synchID) + "_users_queue", message);
+        publishMessage("synch" + std::to_string(other_synchID) + "_users_queue", message);
     }
 
     void consumeUserLists()
@@ -173,20 +178,35 @@ public:
         // TODO: while the number of synchronizers is harcorded as 6 right now, you need to change this
         // to use the correct number of follower synchronizers that exist overall
         // accomplish this by making a gRPC request to the coordinator asking for the list of all follower synchronizers registered with it
-        for (int i = 1; i <= 6; i++)
+        // for (int i = 1; i <= 6; i++)
+        // {
+        //     std::string queueName = "synch" + std::to_string(i) + "_users_queue";
+        //     std::string message = consumeMessage(queueName, 1000); // 1 second timeout
+        //     if (!message.empty())
+        //     {
+        //         Json::Value root;
+        //         Json::Reader reader;
+        //         if (reader.parse(message, root))
+        //         {
+        //             for (const auto &user : root["users"])
+        //             {
+        //                 allUsers.push_back(user.asString());
+        //             }
+        //         }
+        //     }
+        // }
+
+        std::string queueName = "synch" + std::to_string(synchID) + "_users_queue";
+        std::string message = consumeMessage(queueName, 1000); // 1 second timeout
+        if (!message.empty())
         {
-            std::string queueName = "synch" + std::to_string(i) + "_users_queue";
-            std::string message = consumeMessage(queueName, 1000); // 1 second timeout
-            if (!message.empty())
+            Json::Value root;
+            Json::Reader reader;
+            if (reader.parse(message, root))
             {
-                Json::Value root;
-                Json::Reader reader;
-                if (reader.parse(message, root))
+                for (const auto &user : root["users"])
                 {
-                    for (const auto &user : root["users"])
-                    {
-                        allUsers.push_back(user.asString());
-                    }
+                    allUsers.push_back(user.asString());
                 }
             }
         }
@@ -423,9 +443,9 @@ int main(int argc, char **argv)
 void run_synchronizer(std::string coordIP, std::string coordPort, std::string port, int synchID, SynchronizerRabbitMQ &rabbitMQ)
 {
     // setup coordinator stub
-    std::string target_str = coordIP + ":" + coordPort;
-    std::unique_ptr<CoordService::Stub> coord_stub_;
-    coord_stub_ = std::unique_ptr<CoordService::Stub>(CoordService::NewStub(grpc::CreateChannel(target_str, grpc::InsecureChannelCredentials())));
+    // std::string target_str = coordIP + ":" + coordPort;
+    // std::unique_ptr<CoordService::Stub> coord_stub_;
+    // coord_stub_ = std::unique_ptr<CoordService::Stub>(CoordService::NewStub(grpc::CreateChannel(target_str, grpc::InsecureChannelCredentials())));
 
     ServerInfo msg;
     Confirmation c;
@@ -447,36 +467,44 @@ void run_synchronizer(std::string coordIP, std::string coordPort, std::string po
         id.set_id(synchID);
 
         // making a request to the coordinator to see count of follower synchronizers
-        coord_stub_->GetAllFollowerServers(&context, id, &followerServers);
+        stub->GetAllFollowerServers(&context, id, &followerServers);
 
-        std::vector<int> server_ids;
-        std::vector<std::string> hosts, ports;
-        for (std::string host : followerServers.hostname())
-        {
-            hosts.push_back(host);
-        }
-        for (std::string port : followerServers.port())
-        {
-            ports.push_back(port);
-        }
-        for (int serverid : followerServers.serverid())
-        {
-            server_ids.push_back(serverid);
-        }
+        // std::vector<int> server_ids;
+        // std::vector<std::string> hosts, ports;
+        // for (std::string host : followerServers.hostname())
+        // {
+        //     hosts.push_back(host);
+        // }
+        // for (std::string port : followerServers.port())
+        // {
+        //     ports.push_back(port);
+        // }
+        // for (int serverid : followerServers.serverid())
+        // {
+        //     server_ids.push_back(serverid);
+        // }
 
         // update the count of how many follower sychronizer processes the coordinator has registered
 
         // below here, you run all the update functions that synchronize the state across all the clusters
         // make any modifications as necessary to satisfy the assignments requirements
 
-        // Publish user list
-        rabbitMQ.publishUserList();
+        if (IsMaster()) {
 
-        // Publish client relations
-        rabbitMQ.publishClientRelations();
+            // std::cout << "Synchronizer with synchID " << synchID << " is the master" << std::endl;
 
-        // Publish timelines
-        rabbitMQ.publishTimelines();
+            // Publish user list
+            std::vector<int> other_cluster_synchIDs = GetOtherClusterSynchIDs();
+            for (auto other_synchID : other_cluster_synchIDs) {
+                rabbitMQ.publishUserList(other_synchID);
+            }
+
+            // Publish client relations
+            rabbitMQ.publishClientRelations();
+
+            // Publish timelines
+            rabbitMQ.publishTimelines();
+        }
     }
     return;
 }
@@ -518,7 +546,8 @@ void Heartbeat(std::string coordinatorIp, std::string coordinatorPort, ServerInf
 
     log(INFO, "Sending initial heartbeat to coordinator");
     std::string coordinatorInfo = coordinatorIp + ":" + coordinatorPort;
-    std::unique_ptr<CoordService::Stub> stub = std::unique_ptr<CoordService::Stub>(CoordService::NewStub(grpc::CreateChannel(coordinatorInfo, grpc::InsecureChannelCredentials())));
+    // std::unique_ptr<CoordService::Stub> stub = std::unique_ptr<CoordService::Stub>(CoordService::NewStub(grpc::CreateChannel(coordinatorInfo, grpc::InsecureChannelCredentials())));
+    stub = std::unique_ptr<CoordService::Stub>(CoordService::NewStub(grpc::CreateChannel(coordinatorInfo, grpc::InsecureChannelCredentials())));
 
     // send a heartbeat to the coordinator, which registers your follower synchronizer as either a master or a slave
 
@@ -532,8 +561,35 @@ void Heartbeat(std::string coordinatorIp, std::string coordinatorPort, ServerInf
 
     grpc::Status status = stub->GetSynchronizer(&context, id, &serverinfo);
 
-    isMaster = serverinfo.ismaster();
-    clusterSubdirectory = isMaster?"1":"2";
+    // isMaster = serverinfo.ismaster();
+    clusterSubdirectory = synchID<=3?"1":"2";
+}
+
+bool IsMaster() {
+    ClientContext context;
+
+    ID id;
+    id.set_id(synchID);
+    
+    csce662::ServerInfo serverinfo;
+
+    grpc::Status status = stub->IsMaster(&context, id, &serverinfo);
+
+    return serverinfo.ismaster();
+}
+
+std::vector<int> GetOtherClusterSynchIDs() {
+    ClientContext context;
+    ID id;
+    id.set_id(synchID);
+    csce662::SynchIDs synchIDs;
+    grpc::Status status = stub->GetOtherClusterSynchIDs(&context, id, &synchIDs);
+    std::vector<int> other_synchIDs;
+    for (int other_synchID : synchIDs.synchids() ){
+        other_synchIDs.push_back(other_synchID);
+    }
+
+    return other_synchIDs;
 }
 
 bool file_contains_user(std::string filename, std::string user)

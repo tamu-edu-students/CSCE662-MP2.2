@@ -54,6 +54,10 @@
 #include<glog/logging.h>
 #define log(severity, msg) LOG(severity) << msg; google::FlushLogFiles(google::severity); 
 
+#include <semaphore.h>
+#include <fcntl.h>
+#include <sys/stat.h>
+
 #include "sns.grpc.pb.h"
 #include "coordinator.grpc.pb.h"
 #include "coordinator.pb.h"
@@ -151,9 +155,11 @@ class SNSServiceImpl final : public SNSService::Service {
 
     Status List(ServerContext* context, const Request* request, ListReply* list_reply) override {
 
-
         std::string filename = "./cluster_" + clusterId + "/" + serverId + "/all_users.txt";
-        std::vector<std::string> usernames;
+        // std::vector<std::string> usernames;
+
+        std::string semName = "/" + clusterId + "_" + serverId + "_" + "all_users.txt";
+        sem_t *fileSem = sem_open(semName.c_str(), O_CREAT);
 
         std::ifstream file(filename);
         if (!file) {
@@ -163,11 +169,12 @@ class SNSServiceImpl final : public SNSService::Service {
 
         std::string username;
         while (std::getline(file, username)) {
-            usernames.push_back(username);
+            // usernames.push_back(username);
             list_reply->add_all_users(username);
         }
 
         file.close();
+        sem_close(fileSem);
 
         return Status::OK;
 
@@ -194,33 +201,53 @@ class SNSServiceImpl final : public SNSService::Service {
 
     Status Follow(ServerContext* context, const Request* request, Reply* reply) override {
 
+        // std::string u1 = request->username();
+        // std::string u2 = request->arguments(0);
+        // Client* c1 = getClient(u1);
+        // Client* c2 = getClient(u2);
+
+        // if (c1 == nullptr || c2 == nullptr) { // either of the clients dont exist
+        //     return Status(grpc::CANCELLED, "invalid username");
+        // }
+
+        // if (c1 == c2){ // if a client is asked to follow itself
+        //     return Status(grpc::CANCELLED, "same client");
+        // }
+
+
+
+        // // check if the client to follow is already being followed
+        // bool isAlreadyFollowing = std::find(c1->client_following.begin(), c1->client_following.end(), c2) != c1->client_following.end();
+
+        // if (isAlreadyFollowing) {
+        //     return Status(grpc::CANCELLED, "already following");
+        // }
+
+        // // add the clients to each other's relevant vector
+        // c1->client_following.push_back(c2);
+        // c2->client_followers.push_back(c1);
+
+        // return Status::OK; 
+
         std::string u1 = request->username();
         std::string u2 = request->arguments(0);
-        Client* c1 = getClient(u1);
-        Client* c2 = getClient(u2);
 
-        if (c1 == nullptr || c2 == nullptr) { // either of the clients dont exist
-            return Status(grpc::CANCELLED, "invalid username");
+        std::string filename = "./cluster_" + clusterId + "/" + serverId + "/" + u1 + "_following.txt";
+            
+        std::string semName = "/" + clusterId + "_" + serverId + "_" + u1 + "_following.txt";
+        sem_t *fileSem = sem_open(semName.c_str(), O_CREAT);
+        
+        std::ofstream file(filename, std::ios::app);
+        if (!file) {
+            std::cerr << "Error: Unable to open or create file at " << filename << "\n";
+            Status::CANCELLED;
         }
+        file << u2 << "\n";
+        file.close();
+        
+        sem_close(fileSem);
 
-        if (c1 == c2){ // if a client is asked to follow itself
-            return Status(grpc::CANCELLED, "same client");
-        }
-
-
-
-        // check if the client to follow is already being followed
-        bool isAlreadyFollowing = std::find(c1->client_following.begin(), c1->client_following.end(), c2) != c1->client_following.end();
-
-        if (isAlreadyFollowing) {
-            return Status(grpc::CANCELLED, "already following");
-        }
-
-        // add the clients to each other's relevant vector
-        c1->client_following.push_back(c2);
-        c2->client_followers.push_back(c1);
-
-        return Status::OK; 
+        return Status::OK;
     }
 
     Status UnFollow(ServerContext* context, const Request* request, Reply* reply) override {
@@ -311,6 +338,10 @@ class SNSServiceImpl final : public SNSService::Service {
             client_db[username] = newc;
 
             std::string filename = "./cluster_" + clusterId + "/" + serverId + "/all_users.txt";
+            
+            std::string semName = "/" + clusterId + "_" + serverId + "_" + "all_users.txt";
+            sem_t *fileSem = sem_open(semName.c_str(), O_CREAT);
+            
             std::ofstream file(filename, std::ios::app);
             if (!file) {
                 std::cerr << "Error: Unable to open or create file at " << filename << "\n";
@@ -318,6 +349,25 @@ class SNSServiceImpl final : public SNSService::Service {
             }
             file << username << "\n";
             file.close();
+            
+            sem_close(fileSem);
+
+
+            std::string filename2 = "./cluster_" + clusterId + "/" + serverId + "/" + username + "_followers.txt";
+            std::ofstream file2(filename2, std::ios::app);
+            if (!file2.is_open()) {
+                std::cerr << "Error: Unable to create or open the file: " << filename2 << std::endl;
+                return Status::CANCELLED;
+            }
+            file2.close();
+
+            std::string filename3 = "./cluster_" + clusterId + "/" + serverId + "/" + username + "_following.txt";
+            std::ofstream file3(filename3, std::ios::app);
+            if (!file3.is_open()) {
+                std::cerr << "Error: Unable to create or open the file: " << filename3 << std::endl;
+                return Status::CANCELLED;
+            }
+            file3.close();
         }
 
         return Status::OK;
@@ -461,7 +511,7 @@ IReply Heartbeat(std::string clusterId, std::string serverId, std::string hostna
     
     isMaster = confirmation.status();
 
-    std::cout << "Server in cluster " << clusterId << " server id " << serverId << " is master " << isMaster << std::endl;
+    // std::cout << "Server in cluster " << clusterId << " server id " << serverId << " is master " << isMaster << std::endl;
     
     if (status.ok()){
         ire.grpc_status = status;

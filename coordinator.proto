@@ -15,6 +15,8 @@ service CoordService{
     rpc Heartbeat (ServerInfo) returns (Confirmation) {}
     rpc GetServer (ID) returns (ServerInfo) {}
     rpc GetSynchronizer (ID) returns (ServerInfo) {}
+    rpc GetOtherClusterSynchIDs (ID) returns (SynchIDs) {}
+    rpc IsMaster (ID) returns (ServerInfo) {}
     /* // ZooKeeper API here */
     /* // Create a path and place data in the znode */
     /* rpc create (PathAndData) returns (Status) {} */
@@ -45,6 +47,10 @@ message Confirmation{
 //id message definition
 message ID{
     int32 id = 1;
+}
+
+message SynchIDs {
+    repeated int32 synchIDs = 1;
 }
 
 
