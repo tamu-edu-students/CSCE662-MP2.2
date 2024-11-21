@@ -523,18 +523,17 @@ void Heartbeat(std::string coordinatorIp, std::string coordinatorPort, ServerInf
     // send a heartbeat to the coordinator, which registers your follower synchronizer as either a master or a slave
 
     // YOUR CODE HERE
-    // ClientContext context;
+    ClientContext context;
     
-    // ID id;
-    // id.set_id(synchID);
+    ID id;
+    id.set_id(synchID);
     
-    // csce662::ServerInfo serverinfo;
+    csce662::ServerInfo serverinfo;
 
-    // grpc::Status status = stub->GetServer(&context, id, &serverinfo);
+    grpc::Status status = stub->GetSynchronizer(&context, id, &serverinfo);
 
-    // isMaster = serverinfo.ismaster();
-
-    // std::cout << "Server with ID " << synchID << " is the master: " << isMaster << std::endl;
+    isMaster = serverinfo.ismaster();
+    clusterSubdirectory = isMaster?"1":"2";
 }
 
 bool file_contains_user(std::string filename, std::string user)

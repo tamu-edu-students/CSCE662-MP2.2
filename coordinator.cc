@@ -150,6 +150,8 @@ class CoordServiceImpl final : public CoordService::Service {
                 zNode* curZ = clusters[intClusterid - 1][curIndex];
                 curZ->last_heartbeat = getTimeNow();
 
+                confirmation->set_status(curZ->isMaster);
+
                 v_mutex.unlock();
 
             }else { // if a heartbeat was received, that means that sometime in the past, the server was registered and stored in our data structure in memory
@@ -209,7 +211,7 @@ class CoordServiceImpl final : public CoordService::Service {
         // If server is active, return serverinfo
 
         // finding a server to assign to the new client
-        int curIndex = findServer(clusters[clusterId-1], clusterId);
+        int curIndex = findServer(clusters[clusterId-1], 1);
 
         if (curIndex != -1){
             v_mutex.lock();
@@ -229,9 +231,55 @@ class CoordServiceImpl final : public CoordService::Service {
     }
 
 
+    Status GetSynchronizer(ServerContext* context, const ID* id, ServerInfo* serverinfo) override {
+        std::cout<<"Got GetSynchronizer for synchID: "<<id->id()<<std::endl;
+        int serverID = (id->id()<=3)?1:2;
+        int clusterId = ((id->id() - 1) % 3) + 1;
+
+        // finding a server to assign to the new client
+        int curIndex = findServer(clusters[clusterId-1], serverID);
+
+        if (curIndex != -1){
+            v_mutex.lock();
+            zNode* curZ = clusters[clusterId - 1][curIndex];
+            v_mutex.unlock();
+            if (curZ->isActive()){ // setting the ServerInfo values to return to the client if its server is active
+                serverinfo->set_hostname(curZ->hostname);
+                serverinfo->set_port(curZ->port);
+                serverinfo->set_ismaster(curZ->isMaster);
+            } else {
+                std::cout << "The server is not active!\n";
+            }
+        }else { 
+            std::cout << "the server that is supposed to serve the client is down!\n";
+        }
+
+        return Status::OK;
+    }
+
+
 };
 
 void RunServer(std::string port_no){
+
+    for (int i = 1; i <= 3; i++) {
+        for (int j = 1; j <= 2; j++) {
+            std::string directoryPath = "./cluster_" + std::to_string(i) + "/" + std::to_string(j);
+
+            if (std::filesystem::exists(directoryPath)) {
+                std::filesystem::remove_all(directoryPath);
+            }
+
+            std::filesystem::create_directories(directoryPath);
+
+            std::string filename = directoryPath + "/all_users.txt";
+            std::ofstream file(filename);
+            if (!file) {
+                std::cerr << "Error: Unable to create file at " << filename << "\n";
+            }
+        }
+    }
+
     //start thread to check heartbeats
     std::thread hb(checkHeartbeat);
     //localhost = 127.0.0.1

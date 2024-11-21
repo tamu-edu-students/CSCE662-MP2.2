@@ -107,6 +107,9 @@ std::unique_ptr<csce662::CoordService::Stub> coordinator_stub_;
 // coordinator rpcs
 IReply Heartbeat(std::string clusterId, std::string serverId, std::string hostname, std::string port);
 
+bool isMaster;
+std::string clusterId;
+std::string serverId;
 
 //Vector that stores every client that has been created
 /* std::vector<Client*> client_db; */
@@ -148,25 +151,45 @@ class SNSServiceImpl final : public SNSService::Service {
 
     Status List(ServerContext* context, const Request* request, ListReply* list_reply) override {
 
-        // add all known clients to the all_users vector
-        for (const auto& pair : client_db){
-            list_reply->add_all_users(pair.first);
-        }
 
-        std::string username = request->username();
+        std::string filename = "./cluster_" + clusterId + "/" + serverId + "/all_users.txt";
+        std::vector<std::string> usernames;
 
-        // add all the followers of the client to the folowers vector
-        Client* c = getClient(username);
-        if (c != NULL){
-            for (Client* x : c->client_followers){
-                list_reply->add_followers(x->username);
-            }
-
-        } else {
+        std::ifstream file(filename);
+        if (!file) {
+            std::cerr << "Error: Unable to open file at " << filename << "\n";
             return Status::CANCELLED;
         }
 
+        std::string username;
+        while (std::getline(file, username)) {
+            usernames.push_back(username);
+            list_reply->add_all_users(username);
+        }
+
+        file.close();
+
         return Status::OK;
+
+        // // add all known clients to the all_users vector
+        // for (const auto& pair : client_db){
+        //     list_reply->add_all_users(pair.first);
+        // }
+
+        // std::string username = request->username();
+
+        // // add all the followers of the client to the folowers vector
+        // Client* c = getClient(username);
+        // if (c != NULL){
+        //     for (Client* x : c->client_followers){
+        //         list_reply->add_followers(x->username);
+        //     }
+
+        // } else {
+        //     return Status::CANCELLED;
+        // }
+
+        // return Status::OK;
     }
 
     Status Follow(ServerContext* context, const Request* request, Reply* reply) override {
@@ -286,6 +309,15 @@ class SNSServiceImpl final : public SNSService::Service {
             newc->last_heartbeat = getTimeNow();
             newc->missed_heartbeat = false;
             client_db[username] = newc;
+
+            std::string filename = "./cluster_" + clusterId + "/" + serverId + "/all_users.txt";
+            std::ofstream file(filename, std::ios::app);
+            if (!file) {
+                std::cerr << "Error: Unable to open or create file at " << filename << "\n";
+                Status::CANCELLED;
+            }
+            file << username << "\n";
+            file.close();
         }
 
         return Status::OK;
@@ -426,6 +458,11 @@ IReply Heartbeat(std::string clusterId, std::string serverId, std::string hostna
     serverinfo.set_port(port);
 
     grpc::Status status = coordinator_stub_->Heartbeat(&context, serverinfo, &confirmation);
+    
+    isMaster = confirmation.status();
+
+    std::cout << "Server in cluster " << clusterId << " server id " << serverId << " is master " << isMaster << std::endl;
+    
     if (status.ok()){
         ire.grpc_status = status;
     }else { // professor said in class that since the servers cannot be run without a coordinator, you should exit
@@ -520,8 +557,9 @@ void checkHeartbeat(){
 
 int main(int argc, char** argv) {
 
-    std::string clusterId = "1";
-    std::string serverId = "1";
+    clusterId = "1";
+    // std::string serverId = "1";
+    serverId = "1";
     std::string coordinatorIP = "localhost";
     std::string coordinatorPort = "9090";
     std::string port = "1000";
