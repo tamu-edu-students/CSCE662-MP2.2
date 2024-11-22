@@ -44,6 +44,7 @@
 #include <fstream>
 #include <iostream>
 #include <list>
+#include <set>
 #include <memory>
 #include <string>
 #include <stdlib.h>
@@ -153,51 +154,113 @@ class SNSServiceImpl final : public SNSService::Service {
         return Status::OK;
     }
 
+    // Status List(ServerContext* context, const Request* request, ListReply* list_reply) override {
+
+    //     std::string filename = "./cluster_" + clusterId + "/" + serverId + "/all_users.txt";
+    //     std::string semName = "/" + clusterId + "_" + serverId + "_" + "all_users.txt";
+    //     sem_t *fileSem = sem_open(semName.c_str(), O_CREAT);
+    //     std::ifstream file(filename);
+    //     if (!file) {
+    //         std::cerr << "Error: Unable to open file at " << filename << "\n";
+    //         return Status::CANCELLED;
+    //     }
+    //     std::string username;
+    //     while (std::getline(file, username)) {
+    //         list_reply->add_all_users(username);
+    //     }
+    //     file.close();
+    //     sem_close(fileSem);
+
+    //     std::string username2 = request->username();
+    //     std::string filename2 = "./cluster_" + clusterId + "/" + serverId + "/" + username2 + "_followers.txt";
+    //     std::string semName2 = "/" + clusterId + "_" + serverId + "_" + username2 + "_followers.txt";
+    //     sem_t *fileSem2 = sem_open(semName2.c_str(), O_CREAT);
+    //     std::ifstream file2(filename2);
+    //     if (!file2) {
+    //         std::cerr << "Error: Unable to open file at " << filename2 << "\n";
+    //         return Status::CANCELLED;
+    //     }
+    //     std::string username3;
+    //     while (std::getline(file2, username3)) {
+    //         list_reply->add_followers(username3);
+    //     }
+    //     file2.close();
+    //     sem_close(fileSem2);
+
+    //     return Status::OK;
+
+    //     // // add all known clients to the all_users vector
+    //     // for (const auto& pair : client_db){
+    //     //     list_reply->add_all_users(pair.first);
+    //     // }
+
+    //     // std::string username = request->username();
+
+    //     // // add all the followers of the client to the folowers vector
+    //     // Client* c = getClient(username);
+    //     // if (c != NULL){
+    //     //     for (Client* x : c->client_followers){
+    //     //         list_reply->add_followers(x->username);
+    //     //     }
+
+    //     // } else {
+    //     //     return Status::CANCELLED;
+    //     // }
+
+    //     // return Status::OK;
+    // }
+
     Status List(ServerContext* context, const Request* request, ListReply* list_reply) override {
+        auto readFile = [](const std::string& filename, const std::string& semName, std::function<void(const std::string&)> addUser) {
+            // Open semaphore and file
+            sem_t* fileSem = sem_open(semName.c_str(), O_CREAT);
+            std::ifstream file(filename);
+            if (!file) {
+                std::cerr << "Error: Unable to open file at " << filename << "\n";
+                return false;
+            }
 
-        std::string filename = "./cluster_" + clusterId + "/" + serverId + "/all_users.txt";
-        // std::vector<std::string> usernames;
+            // Use a set to ensure no duplicates and automatically sort
+            std::set<std::string> uniqueUsers;
+            std::string username;
+            while (std::getline(file, username)) {
+                uniqueUsers.insert(username);  // Insert ensures uniqueness
+            }
 
-        std::string semName = "/" + clusterId + "_" + serverId + "_" + "all_users.txt";
-        sem_t *fileSem = sem_open(semName.c_str(), O_CREAT);
+            // Add users to the list (sorted and deduplicated)
+            for (const auto& user : uniqueUsers) {
+                addUser(user);
+            }
 
-        std::ifstream file(filename);
-        if (!file) {
-            std::cerr << "Error: Unable to open file at " << filename << "\n";
+            // Clean up resources
+            file.close();
+            sem_close(fileSem);
+            return true;
+        };
+
+        // Read all users from the first file
+        std::string allUsersFile = "./cluster_" + clusterId + "/" + serverId + "/all_users.txt";
+        std::string allUsersSemName = "/" + clusterId + "_" + serverId + "_" + "all_users.txt";
+        if (!readFile(allUsersFile, allUsersSemName, [&](const std::string& username) {
+                list_reply->add_all_users(username);
+            })) {
             return Status::CANCELLED;
         }
 
-        std::string username;
-        while (std::getline(file, username)) {
-            // usernames.push_back(username);
-            list_reply->add_all_users(username);
+        // Read followers of the specific user from the second file
+        std::string username2 = request->username();
+        std::string followersFile = "./cluster_" + clusterId + "/" + serverId + "/" + username2 + "_followers.txt";
+        std::string followersSemName = "/" + clusterId + "_" + serverId + "_" + username2 + "_followers.txt";
+        if (!readFile(followersFile, followersSemName, [&](const std::string& username) {
+                list_reply->add_followers(username);
+            })) {
+            return Status::CANCELLED;
         }
 
-        file.close();
-        sem_close(fileSem);
-
         return Status::OK;
-
-        // // add all known clients to the all_users vector
-        // for (const auto& pair : client_db){
-        //     list_reply->add_all_users(pair.first);
-        // }
-
-        // std::string username = request->username();
-
-        // // add all the followers of the client to the folowers vector
-        // Client* c = getClient(username);
-        // if (c != NULL){
-        //     for (Client* x : c->client_followers){
-        //         list_reply->add_followers(x->username);
-        //     }
-
-        // } else {
-        //     return Status::CANCELLED;
-        // }
-
-        // return Status::OK;
     }
+
+
 
     Status Follow(ServerContext* context, const Request* request, Reply* reply) override {
 
@@ -232,6 +295,10 @@ class SNSServiceImpl final : public SNSService::Service {
         std::string u1 = request->username();
         std::string u2 = request->arguments(0);
 
+        if (u1 == u2){ // if a client is asked to follow itself
+            return Status(grpc::CANCELLED, "same client");
+        }
+
         std::string filename = "./cluster_" + clusterId + "/" + serverId + "/" + u1 + "_following.txt";
             
         std::string semName = "/" + clusterId + "_" + serverId + "_" + u1 + "_following.txt";
@@ -246,6 +313,23 @@ class SNSServiceImpl final : public SNSService::Service {
         file.close();
         
         sem_close(fileSem);
+
+        if (getClient(u2) != nullptr || getClient(u2) != NULL) {  // if other user on the same cluster
+            std::string filename = "./cluster_" + clusterId + "/" + serverId + "/" + u2 + "_followers.txt";
+            
+            std::string semName = "/" + clusterId + "_" + serverId + "_" + u2 + "_followers.txt";
+            sem_t *fileSem = sem_open(semName.c_str(), O_CREAT);
+            
+            std::ofstream file(filename, std::ios::app);
+            if (!file) {
+                std::cerr << "Error: Unable to open or create file at " << filename << "\n";
+                Status::CANCELLED;
+            }
+            file << u1 << "\n";
+            file.close();
+            
+            sem_close(fileSem);
+        }
 
         return Status::OK;
     }
