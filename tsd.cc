@@ -65,6 +65,9 @@
 #include "coordinator.pb.h"
 #include "client.h"
 
+#include <thread>
+#include <chrono>
+
 
 using google::protobuf::Timestamp;
 using google::protobuf::Duration;
@@ -600,7 +603,8 @@ class SNSServiceImpl final : public SNSService::Service {
                         writeFile.close();
                     }
                 }
-                std::this_thread::yield();
+                // std::this_thread::yield();
+                std::this_thread::sleep_for(std::chrono::seconds(1));
             }
         });
 
@@ -646,7 +650,8 @@ class SNSServiceImpl final : public SNSService::Service {
                     }
                     line_number[readFilename] = current_line_number;
                 }
-                std::this_thread::yield();
+                // std::this_thread::yield();
+                std::this_thread::sleep_for(std::chrono::seconds(1));
             }
         });
 
