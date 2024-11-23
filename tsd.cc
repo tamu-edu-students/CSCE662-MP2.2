@@ -43,6 +43,7 @@
 
 #include <fstream>
 #include <iostream>
+#include <filesystem>
 #include <list>
 #include <set>
 #include <memory>
@@ -121,6 +122,18 @@ std::string serverId;
 
 // using an unordered map to store clients rather than a vector as this allows for O(1) accessing and O(1) insertion
 std::unordered_map<std::string, Client*> client_db;
+
+std::unordered_map<std::string, int> file_size;
+
+std::uintmax_t getFileSize(const std::string& filename) {
+    std::filesystem::path filePath(filename);
+    if (!std::filesystem::exists(filePath)) {
+        throw std::runtime_error("File does not exist: " + filename);
+    }
+    return std::filesystem::file_size(filePath);
+}
+
+std::unordered_map<std::string, int> line_number;
 
 // util function for checking if a client exists in the client_db and fetching it if it does
 Client* getClient(std::string username){
@@ -452,6 +465,25 @@ class SNSServiceImpl final : public SNSService::Service {
                 return Status::CANCELLED;
             }
             file3.close();
+
+            std::string filename4 = "./cluster_" + clusterId + "/" + serverId + "/" + username + "_read.txt";
+            std::ofstream file4(filename3, std::ios::app);
+            if (!file4.is_open()) {
+                std::cerr << "Error: Unable to create or open the file: " << filename4 << std::endl;
+                return Status::CANCELLED;
+            }
+            file4.close();
+
+            file_size[filename4] = 0;
+            line_number[filename4] = 0;
+
+            std::string filename5 = "./cluster_" + clusterId + "/" + serverId + "/" + username + "_write.txt";
+            std::ofstream file5(filename3, std::ios::app);
+            if (!file5.is_open()) {
+                std::cerr << "Error: Unable to create or open the file: " << filename5 << std::endl;
+                return Status::CANCELLED;
+            }
+            file5.close();
         }
 
         return Status::OK;
@@ -467,7 +499,7 @@ class SNSServiceImpl final : public SNSService::Service {
         std::string u;
         std::vector<std::string> latestMessages;
         std::vector<std::string> allMessages;
-        bool firstTimelineStream = true;
+        // bool firstTimelineStream = true;
 
 
         // multimap to fetch metadata from the servercontext which contains the username of the current client
@@ -481,87 +513,193 @@ class SNSServiceImpl final : public SNSService::Service {
             // customValue is the username from the metadata received from the client
             u = customValue;
             c = getClient(u);
-            c->stream = stream; // set the client's stream to be the current stream
+            // c->stream = stream; // set the client's stream to be the current stream
         }
 
         // if this is the first time the client is logging back 
-        if (firstTimelineStream && c != nullptr) {
-            // Read latest 20 messages from following file
-            std::ifstream followingFile(u + "_following.txt");
-            if (followingFile.is_open()) {
-                std::string line;
-                while (std::getline(followingFile, line)) {
-                    allMessages.push_back(line);
-                }
+        // if (firstTimelineStream && c != nullptr) {
+        //     // Read latest 20 messages from following file
+        //     std::ifstream followingFile(u + "_following.txt");
+        //     if (followingFile.is_open()) {
+        //         std::string line;
+        //         while (std::getline(followingFile, line)) {
+        //             allMessages.push_back(line);
+        //         }
 
-                // Determine the starting index for retrieving latest messages
-                int startIndex = std::max(0, static_cast<int>(allMessages.size()) - MAX_MESSAGES);
+        //         // Determine the starting index for retrieving latest messages
+        //         int startIndex = std::max(0, static_cast<int>(allMessages.size()) - MAX_MESSAGES);
 
-                // Retrieve the latest messages
-                for (int i = startIndex; i < allMessages.size(); ++i) {
-                    latestMessages.push_back(allMessages[i]);
-                }
-                std::reverse(latestMessages.begin(), latestMessages.end()); // reversing the vector to match the assignment description
-                followingFile.close();
+        //         // Retrieve the latest messages
+        //         for (int i = startIndex; i < allMessages.size(); ++i) {
+        //             latestMessages.push_back(allMessages[i]);
+        //         }
+        //         std::reverse(latestMessages.begin(), latestMessages.end()); // reversing the vector to match the assignment description
+        //         followingFile.close();
+        //     }
+
+        //     // Send latest 20 messages to client via the grpc stream
+        //     for (const std::string& msg : latestMessages) {
+        //         Message latestMessage;
+        //         latestMessage.set_msg(msg + "\n");
+        //         stream->Write(latestMessage);
+        //     }
+        //     firstTimelineStream = false;
+        // }
+
+
+        // Read latest 20 messages from following file
+        std::string readFilename = "./cluster_" + clusterId + "/" + serverId + "/" + u + "_read.txt";
+        std::ifstream readFile(readFilename);
+        if (readFile.is_open()) {
+            std::string line;
+            while (std::getline(readFile, line)) {
+                allMessages.push_back(line);
             }
 
-            // Send latest 20 messages to client via the grpc stream
-            for (const std::string& msg : latestMessages) {
-                Message latestMessage;
-                latestMessage.set_msg(msg + "\n");
-                stream->Write(latestMessage);
+            // Determine the starting index for retrieving latest messages
+            int startIndex = std::max(0, static_cast<int>(allMessages.size()) - MAX_MESSAGES);
+
+            // Retrieve the latest messages
+            for (int i = startIndex; i < allMessages.size(); ++i) {
+                latestMessages.push_back(allMessages[i]);
             }
-            firstTimelineStream = false;
+            std::reverse(latestMessages.begin(), latestMessages.end()); // reversing the vector to match the assignment description
+            readFile.close();
         }
 
+        // Send latest 20 messages to client via the grpc stream
+        for (const std::string& msg : latestMessages) {
+            Message latestMessage;
+            latestMessage.set_msg(msg + "\n");
+            stream->Write(latestMessage);
+        }
 
-        while (stream->Read(&m)) { // while there are messages being sent by the client over the stream
+        std::thread writer_thread([&]() {
+            while (true) {
+                
+                if (!c->connected) { std::cout << "Left writer thread of timeline for user: " << u << std::endl; break; }
+                
+                std::cout << "In writer thread of timeline for user: " << u << std::endl;
+                Message m;
+                while (stream->Read(&m)) {
+                    // Convert timestamp to string
+                    std::time_t timestamp_seconds = m.timestamp().seconds();
+                    std::tm* timestamp_tm = std::gmtime(&timestamp_seconds);
 
-            if (c != nullptr) {
+                    char time_str[50]; // Make sure the buffer is large enough
+                    std::strftime(time_str, sizeof(time_str), "%a %b %d %T %Y", timestamp_tm);
 
-                // Convert timestamp to string
-                std::time_t timestamp_seconds = m.timestamp().seconds();
-                std::tm* timestamp_tm = std::gmtime(&timestamp_seconds);
+                    std::string ffo = u + '(' + time_str + ')' + " >> " + m.msg();
 
-                char time_str[50]; // Make sure the buffer is large enough
-                std::strftime(time_str, sizeof(time_str), "%a %b %d %T %Y", timestamp_tm);
-
-                std::string ffo = u + '(' + time_str + ')' + " >> " + m.msg();
-
-                // Append to user's timeline file
-                std::ofstream userFile(u + ".txt", std::ios_base::app);
-                if (userFile.is_open()) {
-                    userFile.seekp(0, std::ios_base::beg);
-                    userFile << ffo;
-                    userFile.close();
-                }
-
-
-                // Send the new message to all followers for their timeline
-                for (Client* follower : c->client_followers) {
-                    if (follower->stream != nullptr) {
-                        Message followerMessage;
-                        followerMessage.set_msg(ffo);
-
-                        if (follower->stream != nullptr) {
-                            follower->stream->Write(followerMessage);
-                        } 
-
-                    } 
-                }
-
-                // Append to  all the followers' following file
-                for (Client* follower : c->client_followers) {
-                    std::ofstream followerFile(follower->username + "_following.txt", std::ios_base::app);
-                    if (followerFile.is_open()) {
-                        followerFile.seekp(0, std::ios_base::beg);
-                        followerFile << ffo;
-                        followerFile.close();
+                    // Append to user's timeline file
+                    std::string writeFilename = "./cluster_" + clusterId + "/" + serverId + "/" + u + "_write.txt";
+                    std::ofstream writeFile(writeFilename, std::ios_base::app);
+                    if (writeFile.is_open()) {
+                        // writeFile.seekp(0, std::ios_base::beg);
+                        writeFile << ffo;
+                        writeFile.close();
                     }
                 }
-            } 
+            }
+        });
 
-        }
+
+        // std::thread test_thread([&]() {
+        //     int i = 0;
+        //     while (true) {
+        //         if (!c->connected) { std::cout << "Left reader thread of timeline for user: " << u << std::endl; break; }
+        //         std::cout << "In reader thread of timeline for user: " << u << std::endl;
+
+        //         std::string readFilename = "./cluster_" + clusterId + "/" + serverId + "/" + u + "_read.txt";
+        //         std::ofstream readFile(readFilename, std::ios_base::app);
+        //         if (readFile.is_open()) {
+        //             // writeFile.seekp(0, std::ios_base::beg);
+        //             readFile << "Hello World!" << i << "\n";
+        //             readFile.close();
+        //         }
+        //         i++;
+        //     }
+        // }); 
+
+
+        std::thread reader_thread([&]() {
+            while (true) {
+                if (!c->connected) { std::cout << "Left reader thread of timeline for user: " << u << std::endl; break; }
+                std::cout << "In reader thread of timeline for user: " << u << std::endl;
+                
+                std::string readFilename = "./cluster_" + clusterId + "/" + serverId + "/" + u + "_read.txt";
+                std::ifstream readFile(readFilename);
+                uintmax_t currentFileSize = getFileSize(readFilename);
+                if (readFile.is_open() && currentFileSize > file_size[readFilename]) {
+                    file_size[readFilename] = currentFileSize;
+                    int start_line_number = line_number[readFilename];
+                    int current_line_number = 0;
+                    std::string message;
+                    Message m;
+                    while (std::getline(readFile, message)) {
+                        if (current_line_number >= start_line_number) {
+                            m.set_msg(message);
+                            stream->Write(m);
+                        }
+                        current_line_number += 1;
+                    }
+                    line_number[readFilename] = current_line_number;
+                }
+            }
+        });
+
+        writer_thread.join();
+        test_thread.join();
+        reader_thread.join();
+
+
+        // while (stream->Read(&m)) { // while there are messages being sent by the client over the stream
+
+        //     if (c != nullptr) {
+
+        //         // Convert timestamp to string
+        //         std::time_t timestamp_seconds = m.timestamp().seconds();
+        //         std::tm* timestamp_tm = std::gmtime(&timestamp_seconds);
+
+        //         char time_str[50]; // Make sure the buffer is large enough
+        //         std::strftime(time_str, sizeof(time_str), "%a %b %d %T %Y", timestamp_tm);
+
+        //         std::string ffo = u + '(' + time_str + ')' + " >> " + m.msg();
+
+        //         // Append to user's timeline file
+        //         std::ofstream userFile(u + ".txt", std::ios_base::app);
+        //         if (userFile.is_open()) {
+        //             userFile.seekp(0, std::ios_base::beg);
+        //             userFile << ffo;
+        //             userFile.close();
+        //         }
+
+
+        //         // Send the new message to all followers for their timeline
+        //         for (Client* follower : c->client_followers) {
+        //             if (follower->stream != nullptr) {
+        //                 Message followerMessage;
+        //                 followerMessage.set_msg(ffo);
+
+        //                 if (follower->stream != nullptr) {
+        //                     follower->stream->Write(followerMessage);
+        //                 } 
+
+        //             } 
+        //         }
+
+        //         // Append to  all the followers' following file
+        //         for (Client* follower : c->client_followers) {
+        //             std::ofstream followerFile(follower->username + "_following.txt", std::ios_base::app);
+        //             if (followerFile.is_open()) {
+        //                 followerFile.seekp(0, std::ios_base::beg);
+        //                 followerFile << ffo;
+        //                 followerFile.close();
+        //             }
+        //         }
+        //     } 
+
+        // }
 
         return Status::OK;
     }

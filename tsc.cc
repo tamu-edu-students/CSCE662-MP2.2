@@ -437,9 +437,9 @@ void Client::Timeline(const std::string& username) {
 
         while (!signalReceived) { // safety checks to make sure the reader thread terminates upon SIGINT
             if (stream->Read(&received_message)) {
-                std::string sender = received_message.username();
+                // std::string sender = received_message.username();
                 std::string message = received_message.msg();
-                std::time_t time = received_message.timestamp().seconds();
+                // std::time_t time = received_message.timestamp().seconds();
                 std::cout << message << std::endl; // printing the server's message via the stream to the timeline
             } 
         }

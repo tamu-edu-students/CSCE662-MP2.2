@@ -483,7 +483,7 @@ void run_synchronizer(std::string coordIP, std::string coordPort, std::string po
             // std::cout << "Synchronizer with synchID " << synchID << " is the master" << std::endl;
 
             std::vector<int> other_cluster_synchIDs = GetOtherClusterSynchIDs();
-            assert(other_cluster_synchIDs.size() == 4);
+            // assert(other_cluster_synchIDs.size() == 4);
             for (auto other_synchID : other_cluster_synchIDs) {
                 // Publish user list
                 rabbitMQ.publishUserList(other_synchID);
