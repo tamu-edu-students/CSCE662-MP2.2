@@ -20,6 +20,7 @@
 #include <fcntl.h>
 #include <fstream>
 #include <iostream>
+#include <filesystem>
 #include <memory>
 #include <string>
 #include <thread>
@@ -95,6 +96,20 @@ bool clientInCluster(int);
 std::vector<int> GetOtherClusterSynchIDs();
 
 std::unique_ptr<csce662::CoordService::Stub> stub;
+
+
+std::unordered_map<std::string, int> file_size;
+
+std::uintmax_t getFileSize(const std::string& filename) {
+    std::filesystem::path filePath(filename);
+    if (!std::filesystem::exists(filePath)) {
+        throw std::runtime_error("File does not exist: " + filename);
+    }
+    return std::filesystem::file_size(filePath);
+}
+
+std::unordered_map<std::string, int> line_number;
+
 
 class SynchronizerRabbitMQ
 {
@@ -251,7 +266,7 @@ public:
             Json::Reader reader;
             if (reader.parse(message, root))
             {
-                std::cout << "Synchronizer with ID " << synchID << " and msg: " << message << std::endl;
+                // std::cout << "Synchronizer with ID " << synchID << " and msg: " << message << std::endl;
                 for (const auto &follower : allUsers) {
                     if (root.isMember(follower)) {
                         for (const auto &leader : root[follower]) {
@@ -275,28 +290,90 @@ public:
     // for every client in your cluster, update all their followers' timeline files
     // by publishing your user's timeline file (or just the new updates in them)
     //  periodically to the message queue of the synchronizer responsible for that client
-    void publishTimelines()
+    void publishTimelines(int other_synchID)
     {
         std::vector<std::string> users = get_all_users_func(synchID);
 
-        for (const auto &client : users)
-        {
+        for (const auto &client : users) {
             int clientId = std::stoi(client);
-            int client_cluster = ((clientId - 1) % 3) + 1;
-            // only do this for clients in your own cluster
-            if (client_cluster != clusterID)
-            {
-                continue;
-            }
+            if (clientInCluster(clientId)) {                
+                std::string writeFilename = "./cluster_" + std::to_string(clusterID) + "/" + clusterSubdirectory + "/" + client + "_write.txt";
 
-            std::vector<std::string> timeline = get_tl_or_fl(synchID, clientId, true);
-            std::vector<std::string> followers = getFollowersOfUser(clientId);
+                if (file_size.find(writeFilename) == file_size.end()) file_size[writeFilename] = 0;
+                if (line_number.find(writeFilename) == line_number.end()) line_number[writeFilename] = 0;
 
-            for (const auto &follower : followers)
-            {
-                // send the timeline updates of your current user to all its followers
+                std::ifstream writeFile(writeFilename);
+                uintmax_t currentFileSize = getFileSize(writeFilename);
+                if (writeFile.is_open() && currentFileSize > file_size[writeFilename]) {
+                    
+                    file_size[writeFilename] = currentFileSize;
+                    int start_line_number = line_number[writeFilename];
+                    int current_line_number = 0;
+                    std::string message;
+                    // Json::Value new_timeline_messages(Json::arrayValue);
+                    std::vector<std::string> new_timeline_messages;
+                    
+                    while (std::getline(writeFile, message)) {
+                        if (current_line_number >= start_line_number) {
+                            // do something with message
+                            // {"t2" : ["message1", "message2", ... ""]}
+                            new_timeline_messages.push_back(message);
+                        }
+                        current_line_number += 1;
+                    }
+                    line_number[writeFilename] = current_line_number;
 
-                // YOUR CODE HERE
+                    if (new_timeline_messages.empty()) assert(false);
+                    
+                    // else {
+                    //     timeline["t" + client] = new_timeline_messages;
+                    // }
+
+                    // Json::FastWriter writer;
+                    // message = writer.write(timeline);
+                    // std::cout << "Timeline Message: " << message << std::endl;
+
+                    std::vector<std::string> followers = getFollowersOfUser(clientId);
+
+                    for (const auto &follower : followers) {
+                        // send the timeline updates of your current user to all its followers
+
+                        // YOUR CODE HERE
+                        // print the follower and the message to be sent to it
+                        
+                        // Json::Value timeline;
+                        // timeline[follower] = new_timeline_messages;
+                        // Json::FastWriter writer;
+                        // message = writer.write(timeline);
+
+                        // std::cout << "To follower: " << follower << " message: " << message << std::endl;
+
+                        int recipient_cluster = ((std::stoi(follower) - 1) % 3) + 1;
+
+                        std::string filename = "./cluster_" + std::to_string(recipient_cluster) + "/" + "1" + "/" + follower + "_read.txt";
+                        std::ofstream file(filename, std::ios::app);
+                        if (!file) { std::cerr << "Error: Unable to open the file: " << filename << std::endl; return; }
+                        for (auto &message : new_timeline_messages) {
+                            file << message << "\n";
+                        }
+                        file.close();
+
+
+                        std::string filename2 = "./cluster_" + std::to_string(recipient_cluster) + "/" + "2" + "/" + follower + "_read.txt";
+                        std::ofstream file2(filename2, std::ios::app);
+                        if (!file2) { std::cerr << "Error: Unable to open the file: " << filename2 << std::endl; return; }
+                        for (auto &message : new_timeline_messages) {
+                            file2 << message << "\n";
+                        }
+                        file2.close();
+
+                        // int follower_queue = ((std::stoi(follower) - 1) % 3) + 1;
+                        // publishMessage("synch" + std::to_string(other_synchID) + "_timeline_queue", message);
+
+
+
+                    }
+                }
             }
         }
     }
@@ -313,6 +390,53 @@ public:
             // the new updates to the timeline of the user it follows
 
             // YOUR CODE HERE
+            Json::Value root;
+            Json::Reader reader;
+            if (reader.parse(message, root))
+            {
+                std::cout << "Synchronizer with ID " << synchID << " and msg: " << message << std::endl;
+                // std::vector<std::string> allUsers = get_all_users_func(synchID);
+                // for (const auto& recipient : allUsers) {
+                //     if (root.isMember("t" + recipient) && clientInCluster(std::stoi(recipient))) {
+                //         std::cout << "here! " << recipient << std::endl;
+                //         std::string filename = "./cluster_" + std::to_string(clusterID) + "/" + clusterSubdirectory + "/" + recipient + "_read.txt";
+                //         std::ofstream file(filename, std::ios::app);
+                //         if (!file) { std::cerr << "Error: Unable to open the file: " << filename << std::endl; return; }
+                //         for (const auto &message : root["t" + recipient]) {
+                //             file << message.asString() << std::endl;
+                //         }
+                //         file.close();
+                //     }
+                // }
+
+                // for (const auto& t_recipient : root.getMemberNames()) {
+                //     // std::cout << "Key: " << t_recipient << " Value: " << root[t_recipient] << std::endl;
+                //     // std::string recipient = t_recipient.at(1);
+                    
+                // }
+
+                // Iterate through the keys and values
+                for (const auto& recipient : root.getMemberNames()) {
+                    // Check if the key starts with "t"
+                    // if (t_recipient.rfind("t", 0) == 0) {  // rfind("t", 0) checks if it starts with "t"
+                    //     // Get the substring after "t"
+                    //     std::string recipient = t_recipient.substr(1);  // Skip the "t"
+                    //     std::cout << "Key: " << t_recipient << " (substring after 't'): " << recipient << " Value: " << root[t_recipient] << std::endl;
+                    // }
+                    std::cout << "Key: " << recipient << " Value: " << root[recipient] << std::endl;
+                    if (root[recipient].isArray()) {
+                        std::cout << "Is Array!" << std::endl;
+                        if (root[recipient].size() > 0) {
+                            std::cout << "at least one element!" << std::endl;
+                            if (root[recipient][0].size() > 3) {
+                                std::cout << "timeline message!" << std::endl;
+                            }
+                        }
+                    }
+                    
+                }
+
+            }
         }
     }
 
@@ -372,7 +496,7 @@ void RunServer(std::string coordIP, std::string coordPort, std::string port_no, 
         while (true) {
             rabbitMQ.consumeUserLists();
             rabbitMQ.consumeClientRelations();
-            rabbitMQ.consumeTimelines();
+            // rabbitMQ.consumeTimelines();
             std::this_thread::sleep_for(std::chrono::seconds(5));
             // you can modify this sleep period as per your choice
         } });
@@ -455,29 +579,6 @@ void run_synchronizer(std::string coordIP, std::string coordPort, std::string po
         ID id;
         id.set_id(synchID);
 
-        // making a request to the coordinator to see count of follower synchronizers
-        // stub->GetAllFollowerServers(&context, id, &followerServers);
-
-        // std::vector<int> server_ids;
-        // std::vector<std::string> hosts, ports;
-        // for (std::string host : followerServers.hostname())
-        // {
-        //     hosts.push_back(host);
-        // }
-        // for (std::string port : followerServers.port())
-        // {
-        //     ports.push_back(port);
-        // }
-        // for (int serverid : followerServers.serverid())
-        // {
-        //     server_ids.push_back(serverid);
-        // }
-
-        // update the count of how many follower sychronizer processes the coordinator has registered
-
-        // below here, you run all the update functions that synchronize the state across all the clusters
-        // make any modifications as necessary to satisfy the assignments requirements
-
         if (IsMaster()) {
 
             // std::cout << "Synchronizer with synchID " << synchID << " is the master" << std::endl;
@@ -490,12 +591,10 @@ void run_synchronizer(std::string coordIP, std::string coordPort, std::string po
 
                 // Publish client relations
                 rabbitMQ.publishClientRelations(other_synchID);
+
+                // Publish timelines
+                rabbitMQ.publishTimelines(other_synchID);
             }
-
-            
-
-            // Publish timelines
-            rabbitMQ.publishTimelines();
         }
     }
     return;
@@ -657,22 +756,10 @@ std::vector<std::string> get_tl_or_fl(int synchID, int clientID, bool tl)
 std::vector<std::string> getFollowersOfUser(int ID)
 {
     std::vector<std::string> followers;
+    if (!clientInCluster(ID)) return followers;
     std::string clientID = std::to_string(ID);
-    std::vector<std::string> usersInCluster = get_all_users_func(synchID);
-
-    for (auto userID : usersInCluster)
-    { // Examine each user's following file
-        std::string file = "cluster_" + std::to_string(clusterID) + "/" + clusterSubdirectory + "/" + userID + "_follow_list.txt";
-        std::string semName = "/" + std::to_string(clusterID) + "_" + clusterSubdirectory + "_" + userID + "_follow_list.txt";
-        sem_t *fileSem = sem_open(semName.c_str(), O_CREAT);
-        // std::cout << "Reading file " << file << std::endl;
-        if (file_contains_user(file, clientID))
-        {
-            followers.push_back(userID);
-        }
-        sem_close(fileSem);
-    }
-
+    std::string filename = "cluster_" + std::to_string(clusterID) + "/" + clusterSubdirectory + "/" + clientID + "_followers.txt";
+    followers = get_lines_from_file(filename);
     return followers;
 }
 
@@ -681,24 +768,6 @@ std::vector<std::string> getFollowingsOfUser(int ID)
     std::string filename = "cluster_" + std::to_string(clusterID) + "/" + clusterSubdirectory + "/" + std::to_string(ID) + "_following.txt";    
     std::vector<std::string> followings = get_lines_from_file(filename);
     return followings;
-
-    // std::string clientID = std::to_string(ID);
-    // std::vector<std::string> usersInCluster = get_all_users_func(synchID);
-
-    // for (auto userID : usersInCluster)
-    // { // Examine each user's following file
-    //     std::string file = "cluster_" + std::to_string(clusterID) + "/" + clusterSubdirectory + "/" + userID + "_follow_list.txt";
-    //     std::string semName = "/" + std::to_string(clusterID) + "_" + clusterSubdirectory + "_" + userID + "_follow_list.txt";
-    //     sem_t *fileSem = sem_open(semName.c_str(), O_CREAT);
-    //     // std::cout << "Reading file " << file << std::endl;
-    //     if (file_contains_user(file, clientID))
-    //     {
-    //         followers.push_back(userID);
-    //     }
-    //     sem_close(fileSem);
-    // }
-
-    // return followers;
 }
 
 bool clientInCluster(int ID) {

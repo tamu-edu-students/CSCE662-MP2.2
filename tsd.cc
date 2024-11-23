@@ -467,7 +467,7 @@ class SNSServiceImpl final : public SNSService::Service {
             file3.close();
 
             std::string filename4 = "./cluster_" + clusterId + "/" + serverId + "/" + username + "_read.txt";
-            std::ofstream file4(filename3, std::ios::app);
+            std::ofstream file4(filename4, std::ios::app);
             if (!file4.is_open()) {
                 std::cerr << "Error: Unable to create or open the file: " << filename4 << std::endl;
                 return Status::CANCELLED;
@@ -478,7 +478,7 @@ class SNSServiceImpl final : public SNSService::Service {
             line_number[filename4] = 0;
 
             std::string filename5 = "./cluster_" + clusterId + "/" + serverId + "/" + username + "_write.txt";
-            std::ofstream file5(filename3, std::ios::app);
+            std::ofstream file5(filename5, std::ios::app);
             if (!file5.is_open()) {
                 std::cerr << "Error: Unable to create or open the file: " << filename5 << std::endl;
                 return Status::CANCELLED;
@@ -579,7 +579,7 @@ class SNSServiceImpl final : public SNSService::Service {
                 
                 if (!c->connected) { std::cout << "Left writer thread of timeline for user: " << u << std::endl; break; }
                 
-                std::cout << "In writer thread of timeline for user: " << u << std::endl;
+                // std::cout << "In writer thread of timeline for user: " << u << std::endl;
                 Message m;
                 while (stream->Read(&m)) {
                     // Convert timestamp to string
@@ -589,7 +589,7 @@ class SNSServiceImpl final : public SNSService::Service {
                     char time_str[50]; // Make sure the buffer is large enough
                     std::strftime(time_str, sizeof(time_str), "%a %b %d %T %Y", timestamp_tm);
 
-                    std::string ffo = u + '(' + time_str + ')' + " >> " + m.msg();
+                    std::string ffo = u + " (" + time_str + ')' + " >> " + m.msg();
 
                     // Append to user's timeline file
                     std::string writeFilename = "./cluster_" + clusterId + "/" + serverId + "/" + u + "_write.txt";
@@ -600,6 +600,7 @@ class SNSServiceImpl final : public SNSService::Service {
                         writeFile.close();
                     }
                 }
+                std::this_thread::yield();
             }
         });
 
@@ -625,7 +626,7 @@ class SNSServiceImpl final : public SNSService::Service {
         std::thread reader_thread([&]() {
             while (true) {
                 if (!c->connected) { std::cout << "Left reader thread of timeline for user: " << u << std::endl; break; }
-                std::cout << "In reader thread of timeline for user: " << u << std::endl;
+                // std::cout << "In reader thread of timeline for user: " << u << std::endl;
                 
                 std::string readFilename = "./cluster_" + clusterId + "/" + serverId + "/" + u + "_read.txt";
                 std::ifstream readFile(readFilename);
@@ -645,11 +646,12 @@ class SNSServiceImpl final : public SNSService::Service {
                     }
                     line_number[readFilename] = current_line_number;
                 }
+                std::this_thread::yield();
             }
         });
 
         writer_thread.join();
-        test_thread.join();
+        // test_thread.join();
         reader_thread.join();
 
 

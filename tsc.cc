@@ -408,6 +408,7 @@ void Client::Timeline(const std::string& username) {
 
                 if (!signalReceived){ // unless there is no SIGINT, write to server's stream
                     stream->Write(m);
+                    std::this_thread::yield();
                 } else { // perform the same kind of cleanup of client's stream via calling unfollow as this avoids segfaults if a dead stream is written to
 
                     signalReceived = 0;
@@ -441,7 +442,8 @@ void Client::Timeline(const std::string& username) {
                 std::string message = received_message.msg();
                 // std::time_t time = received_message.timestamp().seconds();
                 std::cout << message << std::endl; // printing the server's message via the stream to the timeline
-            } 
+            }
+            std::this_thread::yield();
         }
 
         Request request; // cleanup of stream via calling unfollow as done above multiple times
