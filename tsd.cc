@@ -47,6 +47,7 @@
 #include <list>
 #include <set>
 #include <memory>
+#include <utility>
 #include <string>
 #include <stdlib.h>
 #include <unistd.h>
@@ -126,7 +127,18 @@ std::string serverId;
 // using an unordered map to store clients rather than a vector as this allows for O(1) accessing and O(1) insertion
 std::unordered_map<std::string, Client*> client_db;
 
-std::unordered_map<std::string, int> file_size;
+
+
+struct pair_hash {
+    template <typename T1, typename T2>
+    std::size_t operator()(const std::pair<T1, T2>& p) const {
+        auto h1 = std::hash<T1>{}(p.first);
+        auto h2 = std::hash<T2>{}(p.second);
+        return h1 ^ (h2 << 1); // Combine the two hashes
+    }
+};
+
+std::unordered_map<std::pair<std::string, std::string>, int, pair_hash> file_size;
 
 std::uintmax_t getFileSize(const std::string& filename) {
     std::filesystem::path filePath(filename);
@@ -136,7 +148,9 @@ std::uintmax_t getFileSize(const std::string& filename) {
     return std::filesystem::file_size(filePath);
 }
 
-std::unordered_map<std::string, int> line_number;
+std::unordered_map<std::pair<std::string, std::string>, int, pair_hash> line_number;
+
+
 
 // util function for checking if a client exists in the client_db and fetching it if it does
 Client* getClient(std::string username){
@@ -477,8 +491,8 @@ class SNSServiceImpl final : public SNSService::Service {
             }
             file4.close();
 
-            file_size[filename4] = 0;
-            line_number[filename4] = 0;
+            // file_size[filename4] = 0;
+            // line_number[filename4] = 0;
 
             std::string filename5 = "./cluster_" + clusterId + "/" + serverId + "/" + username + "_write.txt";
             std::ofstream file5(filename5, std::ios::app);
@@ -550,32 +564,32 @@ class SNSServiceImpl final : public SNSService::Service {
         // }
 
 
-        // Read latest 20 messages from following file
-        std::string readFilename = "./cluster_" + clusterId + "/" + serverId + "/" + u + "_read.txt";
-        std::ifstream readFile(readFilename);
-        if (readFile.is_open()) {
-            std::string line;
-            while (std::getline(readFile, line)) {
-                allMessages.push_back(line);
-            }
+        // // Read latest 20 messages from following file
+        // std::string readFilename = "./cluster_" + clusterId + "/" + serverId + "/" + u + "_read.txt";
+        // std::ifstream readFile(readFilename);
+        // if (readFile.is_open()) {
+        //     std::string line;
+        //     while (std::getline(readFile, line)) {
+        //         allMessages.push_back(line);
+        //     }
 
-            // Determine the starting index for retrieving latest messages
-            int startIndex = std::max(0, static_cast<int>(allMessages.size()) - MAX_MESSAGES);
+        //     // Determine the starting index for retrieving latest messages
+        //     int startIndex = std::max(0, static_cast<int>(allMessages.size()) - MAX_MESSAGES);
 
-            // Retrieve the latest messages
-            for (int i = startIndex; i < allMessages.size(); ++i) {
-                latestMessages.push_back(allMessages[i]);
-            }
-            std::reverse(latestMessages.begin(), latestMessages.end()); // reversing the vector to match the assignment description
-            readFile.close();
-        }
+        //     // Retrieve the latest messages
+        //     for (int i = startIndex; i < allMessages.size(); ++i) {
+        //         latestMessages.push_back(allMessages[i]);
+        //     }
+        //     std::reverse(latestMessages.begin(), latestMessages.end()); // reversing the vector to match the assignment description
+        //     readFile.close();
+        // }
 
-        // Send latest 20 messages to client via the grpc stream
-        for (const std::string& msg : latestMessages) {
-            Message latestMessage;
-            latestMessage.set_msg(msg + "\n");
-            stream->Write(latestMessage);
-        }
+        // // Send latest 20 messages to client via the grpc stream
+        // for (const std::string& msg : latestMessages) {
+        //     Message latestMessage;
+        //     latestMessage.set_msg(msg + "\n");
+        //     stream->Write(latestMessage);
+        // }
 
         std::thread writer_thread([&]() {
             while (true) {
@@ -633,11 +647,22 @@ class SNSServiceImpl final : public SNSService::Service {
                 // std::cout << "In reader thread of timeline for user: " << u << std::endl;
                 
                 std::string readFilename = "./cluster_" + clusterId + "/" + serverId + "/" + u + "_read.txt";
+
+                auto key = std::make_pair(readFilename, u);
+
+                if (file_size.find(key) == file_size.end()) {
+                    file_size[key] = 0;
+                }
+
+                if (line_number.find(key) == line_number.end()) {
+                    line_number[key] = 0;
+                }
+
                 std::ifstream readFile(readFilename);
                 uintmax_t currentFileSize = getFileSize(readFilename);
-                if (readFile.is_open() && currentFileSize > file_size[readFilename]) {
-                    file_size[readFilename] = currentFileSize;
-                    int start_line_number = line_number[readFilename];
+                if (readFile.is_open() && currentFileSize > file_size[key]) {
+                    file_size[key] = currentFileSize;
+                    int start_line_number = line_number[key];
                     int current_line_number = 0;
                     std::string message;
                     Message m;
@@ -648,7 +673,7 @@ class SNSServiceImpl final : public SNSService::Service {
                         }
                         current_line_number += 1;
                     }
-                    line_number[readFilename] = current_line_number;
+                    line_number[key] = current_line_number;
                 }
                 // std::this_thread::yield();
                 std::this_thread::sleep_for(std::chrono::seconds(1));
