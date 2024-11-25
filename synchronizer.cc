@@ -23,6 +23,7 @@
 #include <filesystem>
 #include <memory>
 #include <string>
+#include <utility>
 #include <thread>
 #include <mutex>
 #include <stdlib.h>
@@ -111,6 +112,18 @@ std::uintmax_t getFileSize(const std::string& filename) {
 std::unordered_map<std::string, int> line_number;
 
 
+
+struct PairHash {
+    std::size_t operator()(const std::pair<std::string, std::string>& p) const {
+        std::size_t h1 = std::hash<std::string>{}(p.first);  // Hash the first element
+        std::size_t h2 = std::hash<std::string>{}(p.second); // Hash the second element
+        return h1 ^ (h2 << 1); // Combine the hashes using XOR and a shift
+    }
+};
+
+std::unordered_map<std::pair<std::string, std::string>, int, PairHash> already_sent_message_to_queue;
+
+
 class SynchronizerRabbitMQ
 {
 private:
@@ -137,8 +150,16 @@ private:
 
     void publishMessage(const std::string &queueName, const std::string &message)
     {
-        amqp_basic_publish(conn, channel, amqp_empty_bytes, amqp_cstring_bytes(queueName.c_str()),
+        auto key = std::make_pair(queueName, message);
+        if (already_sent_message_to_queue.find(key) == already_sent_message_to_queue.end()) {
+            already_sent_message_to_queue[key] = 0;
+        }
+
+        if (already_sent_message_to_queue[key] < 3) {
+            amqp_basic_publish(conn, channel, amqp_empty_bytes, amqp_cstring_bytes(queueName.c_str()),
                            0, 0, NULL, amqp_cstring_bytes(message.c_str()));
+            already_sent_message_to_queue[key] += 1;
+        }
     }
 
     std::string consumeMessage(const std::string &queueName, int timeout_ms = 5000)
@@ -186,7 +207,7 @@ public:
         }
         Json::FastWriter writer;
         std::string message = writer.write(userList);
-        std::cout << "From synchID " << synchID << "to " << other_synchID << " with users " << message << std::endl;
+        // std::cout << "From synchID " << synchID << " to " << other_synchID << " with users " << message << std::endl;
         publishMessage("synch" + std::to_string(other_synchID) + "_users_queue", message);
     }
 
@@ -201,6 +222,7 @@ public:
 
         std::string queueName = "synch" + std::to_string(synchID) + "_users_queue";
         std::string message = consumeMessage(queueName, 100); // 1 second timeout
+        // std::cout << "In synchronizer " << synchID << " recieved " << message << std::endl;
         if (!message.empty())
         {
             Json::Value root;
@@ -212,8 +234,8 @@ public:
                     allUsers.push_back(user.asString());
                 }
             }
+            updateAllUsersFile(allUsers);
         }
-        updateAllUsersFile(allUsers);
     }
 
     void publishClientRelations(int other_synchID)
@@ -580,7 +602,7 @@ void run_synchronizer(std::string coordIP, std::string coordPort, std::string po
         ID id;
         id.set_id(synchID);
 
-        std::cout << "Synchronizer with synchID " << synchID << " in main" << std::endl;
+        // std::cout << "Synchronizer with synchID " << synchID << " in main" << std::endl;
 
         bool _isMaster = IsMaster();
         if (!_isMaster && synchID <= 3) {
@@ -591,11 +613,11 @@ void run_synchronizer(std::string coordIP, std::string coordPort, std::string po
         if (_isMaster) {
             std::vector<int> other_cluster_synchIDs = GetOtherClusterSynchIDs();
 
-            std::cout << "Synchronizer with synchID " << synchID << " is the master sending to: ";
-            for (auto id : other_cluster_synchIDs) {
-                std::cout << id << " ";
-            }
-            std::cout << "" << std::endl;
+            // std::cout << "Synchronizer with synchID " << synchID << " is the master sending to: ";
+            // for (auto id : other_cluster_synchIDs) {
+            //     std::cout << id << " ";
+            // }
+            // std::cout << "" << std::endl;
 
 
             // assert(other_cluster_synchIDs.size() == 4);
