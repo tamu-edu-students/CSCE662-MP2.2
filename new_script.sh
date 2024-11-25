@@ -1,8 +1,5 @@
 #!/bin/bash
 
-# need to run this command below
-# chmod +x startup.sh
-
 # Function to handle SIGINT (Ctrl-C)
 cleanup() {
     echo "Detected Ctrl-C. Running stop.sh..."

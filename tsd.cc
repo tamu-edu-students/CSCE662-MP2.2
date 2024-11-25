@@ -302,12 +302,12 @@ class SNSServiceImpl final : public SNSService::Service {
 
     Status UnFollow(ServerContext* context, const Request* request, Reply* reply) override {
 
-        if (isMaster && connected_to_slave) {
-            ClientContext context;
-            // Request request;
-            Reply reply;
-            stub_->UnFollow(&context, *request, &reply);
-        }
+        // if (isMaster && connected_to_slave) {
+        //     ClientContext context;
+        //     // Request request;
+        //     Reply reply;
+        //     stub_->UnFollow(&context, *request, &reply);
+        // }
 
         std::string username = request->username();
         // using a multimap to fetch the metadata out of the client's servercontext so we can check to see if a SIGINT was issued on the client's timeline
@@ -641,20 +641,20 @@ IReply Heartbeat(std::string clusterId, std::string serverId, std::string hostna
     isMaster = confirmation.status();
     std::string new_slave_address = confirmation.address();
 
-    std::cout << "Server in cluster " << clusterId << " server id " << serverId << " is master " << isMaster << std::endl;
+    // std::cout << "Server in cluster " << clusterId << " server id " << serverId << " is master " << isMaster << std::endl;
 
     if (isMaster) {
         if (new_slave_address == "") {
             connected_to_slave = false;
-            std::cout << "Server in cluster " << clusterId << " server id " << serverId << " is not connected to slave" << std::endl;
+            // std::cout << "Server in cluster " << clusterId << " server id " << serverId << " is not connected to slave" << std::endl;
         } else {
             if (new_slave_address != old_slave_address) {
-                std::cout << "New Slave Address: " << new_slave_address << " Old Slave Address" << old_slave_address << std::endl; 
+                // std::cout << "New Slave Address: " << new_slave_address << " Old Slave Address" << old_slave_address << std::endl; 
                 grpc::ChannelArguments channel_args;
                 stub_ = csce662::SNSService::NewStub(grpc::CreateCustomChannel(new_slave_address, grpc::InsecureChannelCredentials(), channel_args));
                 old_slave_address = new_slave_address;
             }
-            std::cout << "Server in cluster " << clusterId << " server id " << serverId << " is connected to slave address " << new_slave_address << std::endl;
+            // std::cout << "Server in cluster " << clusterId << " server id " << serverId << " is connected to slave address " << new_slave_address << std::endl;
             connected_to_slave = true;
         }
     }
@@ -731,7 +731,7 @@ void checkHeartbeat(){
 
         for (const auto& pair : client_db){
             if(difftime(getTimeNow(),pair.second->last_heartbeat) > 3){
-                std::cout << "missed heartbeat from client with id " << pair.first << std::endl;
+                // std::cout << "missed heartbeat from client with id " << pair.first << std::endl;
                 if(!pair.second->missed_heartbeat){
                     Client* current = getClient(pair.first);
                     if (current != NULL){

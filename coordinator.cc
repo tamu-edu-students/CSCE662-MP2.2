@@ -155,31 +155,47 @@ class CoordServiceImpl final : public CoordService::Service {
                 zNode* curZ = clusters[intClusterid - 1][curIndex];
                 curZ->last_heartbeat = getTimeNow();
 
+                // check each server to see if they are active
+                // update the masters accordingly
+                for (int i = 0; i < clusters.size(); i++) {
+                    bool masterInCluster = false;
+                    for (int j = 0; j < clusters[i].size(); j++) {
+                        if (!clusters[i][j]->isActive()) {
+                            clusters[i][j]->isMaster = false;
+                        } else {
+                            if (!masterInCluster) {
+                                clusters[i][j]->isMaster = true;
+                                masterInCluster = true;
+                            } else {
+                                clusters[i][j]->isMaster = false;
+                            }
+                        }
+                    }
+                }
+
                 confirmation->set_status(curZ->isMaster);
 
-
-                // sending address of slave
-                // int slaveIndex = findServer(clusters[intClusterid-1], 2);
                 std::string slave_address = "";
+                std::string current_address = curZ->hostname + ":" + curZ->port;
+
                 if (clusters[intClusterid-1].size() > 1) {
                     zNode* slaveZ = clusters[intClusterid-1].back();
                     slave_address = slaveZ->hostname + ":" + slaveZ->port;
-                    // std::cout << "Found slave address: " << slave_address << std::endl;
                 }
-
-                // if (slaveIndex != -1) {
-                //     zNode* slaveZ = clusters[intClusterid - 1][slaveIndex];
-                //     slave_address = slaveZ->hostname + ":" + slaveZ->port;
-                //     std::cout << "Found slave address: " << slave_address << std::endl;
-                // }
-                confirmation->set_address(slave_address);
-
+                
+                if (slave_address != current_address) {
+                    confirmation->set_address(slave_address);
+                } else {
+                    confirmation->set_address("");
+                }
 
                 v_mutex.unlock();
 
             }else { // if a heartbeat was received, that means that sometime in the past, the server was registered and stored in our data structure in memory
                 std::cout << "server's znode was not found\n"; // THIS SHOULD NEVER HAPPEN
             }
+
+
 
             
         } else{ // NOT A HEARTBEAT, BUT INSTEAD INITIAL REGISTRATION
@@ -234,21 +250,46 @@ class CoordServiceImpl final : public CoordService::Service {
         // If server is active, return serverinfo
 
         // finding a server to assign to the new client
-        int curIndex = findServer(clusters[clusterId-1], 1);
+        // int curIndex = findServer(clusters[clusterId-1], 1);
 
-        if (curIndex != -1){
-            v_mutex.lock();
-            zNode* curZ = clusters[clusterId - 1][curIndex];
-            v_mutex.unlock();
+        // if (curIndex != -1){
+        //     v_mutex.lock();
+
+        //     for (int j = 0; j < clusters[clusterId - 1].size(); j++) {
+        //         zNode* curZ = clusters[clusterId - 1][j];
+        //         if (curZ->isActive()){ // setting the ServerInfo values to return to the client if its server is active
+        //             serverinfo->set_hostname(curZ->hostname);
+        //             serverinfo->set_port(curZ->port);
+        //         }
+        //     }
+
+        //     v_mutex.unlock();
+
+        //     // if (curZ->isActive()){ // setting the ServerInfo values to return to the client if its server is active
+        //     //     serverinfo->set_hostname(curZ->hostname);
+        //     //     serverinfo->set_port(curZ->port);
+        //     // } else {
+        //     //     std::cout << "The server is not active!\n";
+        //     // }
+        // } else { 
+        //     std::cout << "the server that is supposed to serve the client is down!\n";
+        // }
+
+
+
+        v_mutex.lock();
+
+        for (int j = 0; j < clusters[clusterId - 1].size(); j++) {
+            zNode* curZ = clusters[clusterId - 1][j];
             if (curZ->isActive()){ // setting the ServerInfo values to return to the client if its server is active
                 serverinfo->set_hostname(curZ->hostname);
                 serverinfo->set_port(curZ->port);
-            } else {
-                std::cout << "The server is not active!\n";
+                break;
             }
-        }else { 
-            std::cout << "the server that is supposed to serve the client is down!\n";
         }
+
+        v_mutex.unlock();
+
 
         return Status::OK;
     }
@@ -297,7 +338,9 @@ class CoordServiceImpl final : public CoordService::Service {
         v_mutex.lock();
         for (const auto& pair : synchID_to_server) {
             if (((pair.first - 1) % 3) + 1 != clusterId) {
-                synchIDs->add_synchids(pair.first);
+                if (pair.second->isActive()) {
+                    synchIDs->add_synchids(pair.first);
+                }
             }
         }
         v_mutex.unlock();
@@ -379,7 +422,7 @@ void checkHeartbeat(){
         for (auto& c : clusters){
             for(auto& s : c){
                 if(difftime(getTimeNow(),s->last_heartbeat)>10){
-                    std::cout << "missed heartbeat from server " << s->serverID << std::endl;
+                    // std::cout << "missed heartbeat from server " << s->serverID << std::endl;
                     if(!s->missed_heartbeat){
                         s->missed_heartbeat = true;
                         s->last_heartbeat = getTimeNow();

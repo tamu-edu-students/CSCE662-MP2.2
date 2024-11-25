@@ -186,6 +186,7 @@ public:
         }
         Json::FastWriter writer;
         std::string message = writer.write(userList);
+        std::cout << "From synchID " << synchID << "to " << other_synchID << " with users " << message << std::endl;
         publishMessage("synch" + std::to_string(other_synchID) + "_users_queue", message);
     }
 
@@ -579,11 +580,24 @@ void run_synchronizer(std::string coordIP, std::string coordPort, std::string po
         ID id;
         id.set_id(synchID);
 
-        if (IsMaster()) {
+        std::cout << "Synchronizer with synchID " << synchID << " in main" << std::endl;
 
-            // std::cout << "Synchronizer with synchID " << synchID << " is the master" << std::endl;
+        bool _isMaster = IsMaster();
+        if (!_isMaster && synchID <= 3) {
+            std::cout << "Synchronizer with synchID " << synchID << " exiting" << std::endl;
+            exit(1);
+        }
 
+        if (_isMaster) {
             std::vector<int> other_cluster_synchIDs = GetOtherClusterSynchIDs();
+
+            std::cout << "Synchronizer with synchID " << synchID << " is the master sending to: ";
+            for (auto id : other_cluster_synchIDs) {
+                std::cout << id << " ";
+            }
+            std::cout << "" << std::endl;
+
+
             // assert(other_cluster_synchIDs.size() == 4);
             for (auto other_synchID : other_cluster_synchIDs) {
                 // Publish user list
@@ -717,10 +731,18 @@ std::vector<std::string> get_all_users_func(int synchID)
     std::vector<std::string> master_user_list = get_lines_from_file(master_users_file);
     std::vector<std::string> slave_user_list = get_lines_from_file(slave_users_file);
 
-    if (master_user_list.size() >= slave_user_list.size())
-        return master_user_list;
-    else
-        return slave_user_list;
+    // if (master_user_list.size() >= slave_user_list.size())
+    //     return master_user_list;
+    // else
+    //     return slave_user_list;
+
+    std::unordered_set<std::string> unique_set(master_user_list.begin(), master_user_list.end());
+    unique_set.insert(slave_user_list.begin(), slave_user_list.end());
+
+    // Convert the set back to a vector
+    std::vector<std::string> combined_vector(unique_set.begin(), unique_set.end());
+
+    return combined_vector;
 }
 
 std::vector<std::string> get_tl_or_fl(int synchID, int clientID, bool tl)
