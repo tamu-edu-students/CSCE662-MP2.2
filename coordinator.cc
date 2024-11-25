@@ -157,6 +157,24 @@ class CoordServiceImpl final : public CoordService::Service {
 
                 confirmation->set_status(curZ->isMaster);
 
+
+                // sending address of slave
+                // int slaveIndex = findServer(clusters[intClusterid-1], 2);
+                std::string slave_address = "";
+                if (clusters[intClusterid-1].size() > 1) {
+                    zNode* slaveZ = clusters[intClusterid-1].back();
+                    slave_address = slaveZ->hostname + ":" + slaveZ->port;
+                    // std::cout << "Found slave address: " << slave_address << std::endl;
+                }
+
+                // if (slaveIndex != -1) {
+                //     zNode* slaveZ = clusters[intClusterid - 1][slaveIndex];
+                //     slave_address = slaveZ->hostname + ":" + slaveZ->port;
+                //     std::cout << "Found slave address: " << slave_address << std::endl;
+                // }
+                confirmation->set_address(slave_address);
+
+
                 v_mutex.unlock();
 
             }else { // if a heartbeat was received, that means that sometime in the past, the server was registered and stored in our data structure in memory

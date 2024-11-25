@@ -114,6 +114,10 @@ std::time_t getTimeNow();
 
 std::unique_ptr<csce662::CoordService::Stub> coordinator_stub_;
 
+std::unique_ptr<SNSService::Stub> stub_;
+std::string old_slave_address = "";
+bool connected_to_slave = false;
+
 // coordinator rpcs
 IReply Heartbeat(std::string clusterId, std::string serverId, std::string hostname, std::string port);
 
@@ -169,6 +173,13 @@ class SNSServiceImpl final : public SNSService::Service {
 
     Status ClientHeartbeat(ServerContext* context, const Request* request, Reply* reply) override {
 
+        if (isMaster && connected_to_slave) {
+            ClientContext context;
+            // Request request;
+            Reply reply;
+            stub_->ClientHeartbeat(&context, *request, &reply);
+        }
+
         std::string username = request->username();
 
         /* std::cout << "got a heartbeat from client: " << username << std::endl; */
@@ -184,61 +195,7 @@ class SNSServiceImpl final : public SNSService::Service {
         return Status::OK;
     }
 
-    // Status List(ServerContext* context, const Request* request, ListReply* list_reply) override {
 
-    //     std::string filename = "./cluster_" + clusterId + "/" + serverId + "/all_users.txt";
-    //     std::string semName = "/" + clusterId + "_" + serverId + "_" + "all_users.txt";
-    //     sem_t *fileSem = sem_open(semName.c_str(), O_CREAT);
-    //     std::ifstream file(filename);
-    //     if (!file) {
-    //         std::cerr << "Error: Unable to open file at " << filename << "\n";
-    //         return Status::CANCELLED;
-    //     }
-    //     std::string username;
-    //     while (std::getline(file, username)) {
-    //         list_reply->add_all_users(username);
-    //     }
-    //     file.close();
-    //     sem_close(fileSem);
-
-    //     std::string username2 = request->username();
-    //     std::string filename2 = "./cluster_" + clusterId + "/" + serverId + "/" + username2 + "_followers.txt";
-    //     std::string semName2 = "/" + clusterId + "_" + serverId + "_" + username2 + "_followers.txt";
-    //     sem_t *fileSem2 = sem_open(semName2.c_str(), O_CREAT);
-    //     std::ifstream file2(filename2);
-    //     if (!file2) {
-    //         std::cerr << "Error: Unable to open file at " << filename2 << "\n";
-    //         return Status::CANCELLED;
-    //     }
-    //     std::string username3;
-    //     while (std::getline(file2, username3)) {
-    //         list_reply->add_followers(username3);
-    //     }
-    //     file2.close();
-    //     sem_close(fileSem2);
-
-    //     return Status::OK;
-
-    //     // // add all known clients to the all_users vector
-    //     // for (const auto& pair : client_db){
-    //     //     list_reply->add_all_users(pair.first);
-    //     // }
-
-    //     // std::string username = request->username();
-
-    //     // // add all the followers of the client to the folowers vector
-    //     // Client* c = getClient(username);
-    //     // if (c != NULL){
-    //     //     for (Client* x : c->client_followers){
-    //     //         list_reply->add_followers(x->username);
-    //     //     }
-
-    //     // } else {
-    //     //     return Status::CANCELLED;
-    //     // }
-
-    //     // return Status::OK;
-    // }
 
     Status List(ServerContext* context, const Request* request, ListReply* list_reply) override {
         auto readFile = [](const std::string& filename, const std::string& semName, std::function<void(const std::string&)> addUser) {
@@ -294,33 +251,12 @@ class SNSServiceImpl final : public SNSService::Service {
 
     Status Follow(ServerContext* context, const Request* request, Reply* reply) override {
 
-        // std::string u1 = request->username();
-        // std::string u2 = request->arguments(0);
-        // Client* c1 = getClient(u1);
-        // Client* c2 = getClient(u2);
-
-        // if (c1 == nullptr || c2 == nullptr) { // either of the clients dont exist
-        //     return Status(grpc::CANCELLED, "invalid username");
-        // }
-
-        // if (c1 == c2){ // if a client is asked to follow itself
-        //     return Status(grpc::CANCELLED, "same client");
-        // }
-
-
-
-        // // check if the client to follow is already being followed
-        // bool isAlreadyFollowing = std::find(c1->client_following.begin(), c1->client_following.end(), c2) != c1->client_following.end();
-
-        // if (isAlreadyFollowing) {
-        //     return Status(grpc::CANCELLED, "already following");
-        // }
-
-        // // add the clients to each other's relevant vector
-        // c1->client_following.push_back(c2);
-        // c2->client_followers.push_back(c1);
-
-        // return Status::OK; 
+        if (isMaster && connected_to_slave) {
+            ClientContext context;
+            // Request request;
+            Reply reply;
+            stub_->Follow(&context, *request, &reply);
+        }
 
         std::string u1 = request->username();
         std::string u2 = request->arguments(0);
@@ -366,6 +302,13 @@ class SNSServiceImpl final : public SNSService::Service {
 
     Status UnFollow(ServerContext* context, const Request* request, Reply* reply) override {
 
+        if (isMaster && connected_to_slave) {
+            ClientContext context;
+            // Request request;
+            Reply reply;
+            stub_->UnFollow(&context, *request, &reply);
+        }
+
         std::string username = request->username();
         // using a multimap to fetch the metadata out of the client's servercontext so we can check to see if a SIGINT was issued on the client's timeline
         const std::multimap<grpc::string_ref, grpc::string_ref>& metadata = context->client_metadata();
@@ -389,7 +332,6 @@ class SNSServiceImpl final : public SNSService::Service {
             }
 
         }
-
 
         std::string u1 = request->username();
         std::string u2 = request->arguments(0);
@@ -426,6 +368,13 @@ class SNSServiceImpl final : public SNSService::Service {
 
     // RPC Login
     Status Login(ServerContext* context, const Request* request, Reply* reply) override {
+
+        if (isMaster && connected_to_slave) {
+            ClientContext context;
+            // Request request;
+            Reply reply;
+            stub_->Login(&context, *request, &reply);
+        }
 
         std::string username = request->username();
 
@@ -510,6 +459,13 @@ class SNSServiceImpl final : public SNSService::Service {
 
     Status Timeline(ServerContext* context, ServerReaderWriter<Message, Message>* stream) override {
 
+        if (isMaster && connected_to_slave) {
+            ClientContext context;
+            // Request request;
+            // Reply reply;
+            stub_->Timeline(&context);
+        }
+
         // Initialize variables important for persisting timelines on the disk
         Message m;
         Client* c;
@@ -517,7 +473,6 @@ class SNSServiceImpl final : public SNSService::Service {
         std::vector<std::string> latestMessages;
         std::vector<std::string> allMessages;
         // bool firstTimelineStream = true;
-
 
         // multimap to fetch metadata from the servercontext which contains the username of the current client
         // this helps to Initialize the stream for this client as this is first contact
@@ -532,37 +487,6 @@ class SNSServiceImpl final : public SNSService::Service {
             c = getClient(u);
             // c->stream = stream; // set the client's stream to be the current stream
         }
-
-        // if this is the first time the client is logging back 
-        // if (firstTimelineStream && c != nullptr) {
-        //     // Read latest 20 messages from following file
-        //     std::ifstream followingFile(u + "_following.txt");
-        //     if (followingFile.is_open()) {
-        //         std::string line;
-        //         while (std::getline(followingFile, line)) {
-        //             allMessages.push_back(line);
-        //         }
-
-        //         // Determine the starting index for retrieving latest messages
-        //         int startIndex = std::max(0, static_cast<int>(allMessages.size()) - MAX_MESSAGES);
-
-        //         // Retrieve the latest messages
-        //         for (int i = startIndex; i < allMessages.size(); ++i) {
-        //             latestMessages.push_back(allMessages[i]);
-        //         }
-        //         std::reverse(latestMessages.begin(), latestMessages.end()); // reversing the vector to match the assignment description
-        //         followingFile.close();
-        //     }
-
-        //     // Send latest 20 messages to client via the grpc stream
-        //     for (const std::string& msg : latestMessages) {
-        //         Message latestMessage;
-        //         latestMessage.set_msg(msg + "\n");
-        //         stream->Write(latestMessage);
-        //     }
-        //     firstTimelineStream = false;
-        // }
-
 
         // // Read latest 20 messages from following file
         // std::string readFilename = "./cluster_" + clusterId + "/" + serverId + "/" + u + "_read.txt";
@@ -684,55 +608,6 @@ class SNSServiceImpl final : public SNSService::Service {
         // test_thread.join();
         reader_thread.join();
 
-
-        // while (stream->Read(&m)) { // while there are messages being sent by the client over the stream
-
-        //     if (c != nullptr) {
-
-        //         // Convert timestamp to string
-        //         std::time_t timestamp_seconds = m.timestamp().seconds();
-        //         std::tm* timestamp_tm = std::gmtime(&timestamp_seconds);
-
-        //         char time_str[50]; // Make sure the buffer is large enough
-        //         std::strftime(time_str, sizeof(time_str), "%a %b %d %T %Y", timestamp_tm);
-
-        //         std::string ffo = u + '(' + time_str + ')' + " >> " + m.msg();
-
-        //         // Append to user's timeline file
-        //         std::ofstream userFile(u + ".txt", std::ios_base::app);
-        //         if (userFile.is_open()) {
-        //             userFile.seekp(0, std::ios_base::beg);
-        //             userFile << ffo;
-        //             userFile.close();
-        //         }
-
-
-        //         // Send the new message to all followers for their timeline
-        //         for (Client* follower : c->client_followers) {
-        //             if (follower->stream != nullptr) {
-        //                 Message followerMessage;
-        //                 followerMessage.set_msg(ffo);
-
-        //                 if (follower->stream != nullptr) {
-        //                     follower->stream->Write(followerMessage);
-        //                 } 
-
-        //             } 
-        //         }
-
-        //         // Append to  all the followers' following file
-        //         for (Client* follower : c->client_followers) {
-        //             std::ofstream followerFile(follower->username + "_following.txt", std::ios_base::app);
-        //             if (followerFile.is_open()) {
-        //                 followerFile.seekp(0, std::ios_base::beg);
-        //                 followerFile << ffo;
-        //                 followerFile.close();
-        //             }
-        //         }
-        //     } 
-
-        // }
-
         return Status::OK;
     }
 
@@ -764,8 +639,25 @@ IReply Heartbeat(std::string clusterId, std::string serverId, std::string hostna
     grpc::Status status = coordinator_stub_->Heartbeat(&context, serverinfo, &confirmation);
     
     isMaster = confirmation.status();
+    std::string new_slave_address = confirmation.address();
 
-    // std::cout << "Server in cluster " << clusterId << " server id " << serverId << " is master " << isMaster << std::endl;
+    std::cout << "Server in cluster " << clusterId << " server id " << serverId << " is master " << isMaster << std::endl;
+
+    if (isMaster) {
+        if (new_slave_address == "") {
+            connected_to_slave = false;
+            std::cout << "Server in cluster " << clusterId << " server id " << serverId << " is not connected to slave" << std::endl;
+        } else {
+            if (new_slave_address != old_slave_address) {
+                std::cout << "New Slave Address: " << new_slave_address << " Old Slave Address" << old_slave_address << std::endl; 
+                grpc::ChannelArguments channel_args;
+                stub_ = csce662::SNSService::NewStub(grpc::CreateCustomChannel(new_slave_address, grpc::InsecureChannelCredentials(), channel_args));
+                old_slave_address = new_slave_address;
+            }
+            std::cout << "Server in cluster " << clusterId << " server id " << serverId << " is connected to slave address " << new_slave_address << std::endl;
+            connected_to_slave = true;
+        }
+    }
     
     if (status.ok()){
         ire.grpc_status = status;
