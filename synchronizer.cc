@@ -155,11 +155,14 @@ private:
             already_sent_message_to_queue[key] = 0;
         }
 
-        if (already_sent_message_to_queue[key] < 3) {
-            amqp_basic_publish(conn, channel, amqp_empty_bytes, amqp_cstring_bytes(queueName.c_str()),
+        // if (already_sent_message_to_queue[key] < 20) {
+        //     amqp_basic_publish(conn, channel, amqp_empty_bytes, amqp_cstring_bytes(queueName.c_str()),
+        //                    0, 0, NULL, amqp_cstring_bytes(message.c_str()));
+        //     already_sent_message_to_queue[key] += 1;
+        // }
+
+        amqp_basic_publish(conn, channel, amqp_empty_bytes, amqp_cstring_bytes(queueName.c_str()),
                            0, 0, NULL, amqp_cstring_bytes(message.c_str()));
-            already_sent_message_to_queue[key] += 1;
-        }
     }
 
     std::string consumeMessage(const std::string &queueName, int timeout_ms = 5000)
@@ -520,7 +523,7 @@ void RunServer(std::string coordIP, std::string coordPort, std::string port_no, 
             rabbitMQ.consumeUserLists();
             rabbitMQ.consumeClientRelations();
             // rabbitMQ.consumeTimelines();
-            std::this_thread::sleep_for(std::chrono::seconds(5));
+            std::this_thread::sleep_for(std::chrono::seconds(1));
             // you can modify this sleep period as per your choice
         } });
 
@@ -595,7 +598,8 @@ void run_synchronizer(std::string coordIP, std::string coordPort, std::string po
     while (true)
     {
         // the synchronizers sync files every 5 seconds
-        sleep(5);
+        // sleep(5);
+        sleep(2);
 
         grpc::ClientContext context;
         ServerList followerServers;
